@@ -1,0 +1,43 @@
+name: One-time full Microduck project copy
+on:
+  push:
+    paths:
+      - '.github/workflows/copy-microduck-once.yml'
+permissions:
+  contents: write
+jobs:
+  copy:
+    if: github.repository == 'qq2898498192-prog/codex'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Copy fixed public source without executing source code
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e microduck_rl
+          git clone --no-checkout https://github.com/atrl/microduck_rl.git /tmp/microduck-public
+          git -C /tmp/microduck-public checkout --detach 57280a07b06f7356500b796c8ddcda66008908d2
+          mkdir microduck_rl
+          git -C /tmp/microduck-public archive HEAD | tar -x -C microduck_rl
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess, hashlib, json
+          src = Path('/tmp/microduck-public')
+          dst = Path('microduck_rl')
+          files = subprocess.check_output(['git','-C',str(src),'ls-files','-z']).decode().rstrip('\0').split('\0')
+          manifest = []
+          for rel in files:
+              a, b = src / rel, dst / rel
+              assert a.read_bytes() == b.read_bytes(), rel
+              manifest.append({'path':rel,'sha256':hashlib.sha256(b.read_bytes()).hexdigest()})
+          assert len(files) == 253, len(files)
+          Path('MICRODUCK_IMPORT.json').write_text(json.dumps({'source':'https://github.com/atrl/microduck_rl','commit':'57280a07b06f7356500b796c8ddcda66008908d2','file_count':len(files),'files':manifest},ensure_ascii=False,indent=2)+'\n')
+          print('Verified all',len(files),'source files')
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f microduck_rl MICRODUCK_IMPORT.json
+          git commit -m "Copy complete public Microduck project at 57280a0 (253 files)"
+          git push origin HEAD:main
