@@ -1,0 +1,4 @@
+{
+  "electronics_motor_positive_volume_overlaps": [],
+  "excluded": "shell/frame/shaft/wheel/thermal/yaw；不含线束/孔位/曲面/装配运动；不是完整DRC"
+}

@@ -1,0 +1,71 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>简化交互爆炸试验（非最终模型）</title><style>body{margin:0;background:#eef3f5;color:#213d49;font:16px/1.6 system-ui}main{max-width:1150px;margin:auto;padding:24px}.viz-controls{display:flex;gap:12px;flex-wrap:wrap;align-items:center}.form-label{display:flex;gap:8px;align-items:center}.btn,.form-select{padding:10px;border:1px solid #9eafb7;border-radius:6px;background:white}.text-small{font-size:13px}.form-range{width:180px}</style><main><h1>简化交互爆炸试验</h1><p>这是被用户指出外观不符合目标的历史试验，不是整机效果图的精确三维模型。</p><div id="duck-interactive-v3">
+ <div class="viz-controls">
+ <label class="form-label">展开部位 <select class="form-select" id="duck-group"><option value="all">整机</option><option value="head">屏幕头部</option><option value="yaw">左右转台</option><option value="body">躯干与电池</option><option value="left">左腿与轮组</option><option value="right">右腿与轮组</option></select></label>
+ <label class="form-label">展开程度 <output id="duck-percent">0%</output><input class="form-range" id="duck-range" type="range" min="0" max="100" value="0"></label>
+ <button class="btn" id="duck-open" type="button">展开所选</button><button class="btn" id="duck-close" type="button">全部装回</button>
+ </div>
+ <div id="duck-stage" style="width:100%;height:560px;position:relative;touch-action:none" role="img" aria-label="可旋转的机器人装配模型，拖动上方滑块展开整机或局部。拖动模型旋转，滚轮缩放。"><span id="duck-loading">正在加载三维模型…</span></div>
+ <div class="text-small" id="duck-caption" aria-live="polite">完整装配 · 拖动旋转，滚轮缩放 · 内部件为布局模型，非加工模型</div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script>
+(()=>{
+ const root=document.getElementById('duck-interactive-v3'),stage=root.querySelector('#duck-stage'),caption=root.querySelector('#duck-caption');
+ if(typeof THREE==='undefined'){root.querySelector('#duck-loading').textContent='三维资源未加载，请重新打开。';return;}
+ const T=THREE,scene=new T.Scene(),camera=new T.PerspectiveCamera(36,1,.1,4000);
+ let renderer;try{renderer=new T.WebGLRenderer({antialias:true,alpha:true});}catch(e){root.querySelector('#duck-loading').textContent='当前环境无法启用WebGL。';return;}
+ root.querySelector('#duck-loading').remove();renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.outputColorSpace=T.SRGBColorSpace;stage.appendChild(renderer.domElement);
+ scene.add(new T.HemisphereLight(0xffffff,0x637381,2.3));const key=new T.DirectionalLight(0xffffff,3);key.position.set(-200,400,500);scene.add(key);const fill=new T.DirectionalLight(0xd3f8ff,1.5);fill.position.set(200,100,-200);scene.add(fill);
+ const robot=new T.Group();scene.add(robot);
+ const mats={silver:new T.MeshStandardMaterial({color:0xb6c5cd,metalness:.45,roughness:.34}),teal:new T.MeshStandardMaterial({color:0x078d91,metalness:.18,roughness:.35}),dark:new T.MeshStandardMaterial({color:0x263541,metalness:.15,roughness:.48}),pcb:new T.MeshStandardMaterial({color:0x247b58,roughness:.7}),orange:new T.MeshStandardMaterial({color:0xe89b35,roughness:.6}),black:new T.MeshStandardMaterial({color:0x101a22,roughness:.45}),blue:new T.MeshStandardMaterial({color:0x386692,roughness:.6}),eyes:new T.MeshBasicMaterial({color:0x42f6df})};
+ const items=[],levels={head:0,yaw:0,body:0,left:0,right:0},targets={...levels};
+ function part(name,section,pos,delta){let g=new T.Group();g.position.set(...pos);robot.add(g);items.push({name,section,g,pos:new T.Vector3(...pos),delta:new T.Vector3(...delta)});return g;}
+ function mesh(g,geo,mat,pos=[0,0,0]){const m=new T.Mesh(geo,mats[mat]);m.position.set(...pos);g.add(m);return m;}
+ function box(g,w,h,d,mat,pos=[0,0,0]){return mesh(g,new T.BoxGeometry(w,h,d),mat,pos);}
+ function cyl(g,r,len,mat,pos=[0,0,0],axis='y'){let m=mesh(g,new T.CylinderGeometry(r,r,len,32),mat,pos);if(axis==='x')m.rotation.z=Math.PI/2;if(axis==='z')m.rotation.x=Math.PI/2;return m;}
+ function rounded(g,w,h,d,r,mat,pos=[0,0,0]){let s=new T.Shape(),x=-w/2,y=-h/2;s.moveTo(x+r,y);s.lineTo(x+w-r,y);s.quadraticCurveTo(x+w,y,x+w,y+r);s.lineTo(x+w,y+h-r);s.quadraticCurveTo(x+w,y+h,x+w-r,y+h);s.lineTo(x+r,y+h);s.quadraticCurveTo(x,y+h,x,y+h-r);s.lineTo(x,y+r);s.quadraticCurveTo(x,y,x+r,y);let geo=new T.ExtrudeGeometry(s,{depth:d,bevelEnabled:true,bevelSegments:2,steps:1,bevelSize:.8,bevelThickness:.8,curveSegments:8});geo.translate(0,0,-d/2);return mesh(g,geo,mat,pos);}
+ function pcb(g,w,d){box(g,w,2,d,'pcb');for(let i=0;i<4;i++)box(g,8,3,7,'dark',[-w*.30+i*w*.20,2,0]);box(g,10,4,6,'silver',[w*.3,2,d*.34]);}
+ // Coordinate y is up, front is +z. Head has only a vertical yaw mounting axis.
+ let g=part('一体后头壳','head',[0,312,-6],[0,100,-100]);rounded(g,112,88,3,12,'silver',[0,0,-32]);box(g,108,3,66,'silver',[0,43,0]);box(g,108,3,66,'silver',[0,-43,0]);box(g,3,80,66,'silver',[-55,0,0]);box(g,3,80,66,'silver',[55,0,0]);
+ g=part('屏幕前框','head',[0,312,30],[0,20,110]);rounded(g,109,86,3,12,'dark');rounded(g,60,43,1,3,'black',[0,-8,2.5]);for(let side of [-1,1])for(let i=0;i<7;i++)box(g,2.6,3.5,1,'eyes',[side*15-8+i*2.7,-6+6*Math.sin(i*Math.PI/6),3.5]);cyl(g,3.3,2,'black',[0,29,3],'z');rounded(g,9,5,1,1,'black',[22,29,3]);
+ g=part('LCD背板','head',[0,304,20],[-45,25,60]);box(g,79.9,50.8,4,'pcb');box(g,20,16,3,'dark',[0,0,-3]);
+ g=part('摄像头','head',[-6,341,19],[-48,80,50]);box(g,25,24,2,'pcb');cyl(g,3.5,6,'black',[0,0,4],'z');
+ g=part('ToF模组','head',[29,341,19],[42,80,50]);box(g,12.7,17.8,2,'pcb');box(g,6,5,2,'black',[0,0,2]);
+ g=part('头内安装托架','head',[0,311,3],[0,50,-25]);box(g,90,68,3,'dark');
+ g=part('转台承重轴承','yaw',[0,260,0],[0,68,0]);let ring=new T.Mesh(new T.TorusGeometry(18,4,12,48),mats.silver);ring.rotation.x=Math.PI/2;g.add(ring);
+ g=part('转台轮毂','yaw',[0,250,0],[0,40,0]);cyl(g,15,8,'teal');
+ g=part('转头执行器占位','yaw',[0,227,0],[-65,20,0]);box(g,36,29,30,'dark');cyl(g,6,8,'silver',[0,18,0]);
+ g=part('固定颈座','yaw',[0,220,0],[65,10,-20]);box(g,48,3,44,'teal',[0,20,0]);box(g,48,3,44,'teal',[0,-20,0]);box(g,4,40,44,'dark',[-22,0,0]);box(g,4,40,44,'dark',[22,0,0]);
+ // Torso covers split to expose electronics and lower battery.
+ for(let side of [-1,1]){g=part('躯干侧壳','body',[side*79,171,0],[side*105,0,0]);rounded(g,3,69,86,1,'silver');}
+ g=part('躯干后盖','body',[0,171,-44],[0,15,-105]);rounded(g,156,69,3,9,'silver');
+ g=part('躯干前盖','body',[0,171,44],[0,0,100]);rounded(g,156,69,3,9,'silver');
+ g=part('上盖','body',[0,205,0],[0,70,-45]);box(g,155,3,86,'silver');
+ g=part('主控与散热器','body',[-34,190,-10],[-55,75,-15]);pcb(g,65,30);box(g,42,9,20,'dark',[0,7,0]);for(let i=0;i<8;i++)box(g,2,6,20,'silver',[-18+i*5,14,0]);
+ g=part('配电与实时控制板预留','body',[35,188,13],[60,50,30]);pcb(g,65,35);
+ g=part('电池组预留','body',[0,158,0],[0,-15,100]);rounded(g,75,24,58,3,'blue');box(g,8,26,60,'dark');
+ g=part('电池托盘','body',[0,141,0],[0,-32,50]);box(g,86,3,67,'dark');
+ // Fixed travel-position load frame; no claim of articulated gait.
+ g=part('横向承力骨架','body',[0,121,-8],[0,0,-55]);box(g,144,15,16,'dark');
+ for(let side of [-1,1]){const section=side<0?'left':'right',x=side*69;
+ g=part('腿部承力芯',''+section,[x,103,0],[side*25,0,0]);box(g,18,57,25,'silver');
+ g=part('腿部走线盖',section,[x,103,17],[side*65,0,25]);rounded(g,30,63,7,5,'teal');
+ g=part('腿部线束',section,[x+side*11,103,0],[side*38,0,0]);for(let i=0;i<3;i++)cyl(g,1,48,i===0?'orange':'black',[i*2,0,0]);
+ g=part('脚部上盖',section,[x,72,0],[side*20,80,0]);rounded(g,86,5,146,2,'teal');
+ g=part('双路驱动板预留',section,[x,62,0],[side*20,50,0]);pcb(g,64,54);box(g,35,6,20,'dark',[0,4,0]);
+ g=part('电机安装框',section,[x,38,0],[side*20,0,0]);box(g,84,3,146,'dark',[0,-22,0]);for(let z of [-65,65])box(g,84,40,3,'teal',[0,-2,z]);
+ for(let z of [-48,48]){
+ g=part('编码减速电机',section,[x,29,z],[side*50,0,z*.38]);cyl(g,12.5,69,'silver',[0,0,0],'x');cyl(g,11,15,'dark',[-side*26,0,0],'x');cyl(g,2,12.5,'silver',[side*40,0,0],'x');
+ g=part('轮轴承座',section,[side*116,29,z],[side*80,0,z*.38]);cyl(g,10,6,'dark',[0,0,0],'x');cyl(g,4,10,'silver',[0,0,0],'x');
+ g=part('麦克纳姆轮',section,[side*134,29,z],[side*120,0,z*.38]);cyl(g,21,22,'dark',[0,0,0],'x');cyl(g,11,25,'silver',[0,0,0],'x');for(let i=0;i<9;i++){let a=i*Math.PI*2/9;let roller=mesh(g,new T.CapsuleGeometry(4,16,4,8),'orange',[0,24*Math.cos(a),24*Math.sin(a)]);let dir=new T.Vector3(side*(z>0?1:-1)*.7,-Math.sin(a)*.7,Math.cos(a)*.7).normalize();roller.quaternion.setFromUnitVectors(new T.Vector3(0,1,0),dir);}
+ }
+ }
+ let az=.62,el=.23,dist=770;function view(){camera.position.set(dist*Math.sin(az)*Math.cos(el),180+dist*Math.sin(el),dist*Math.cos(az)*Math.cos(el));camera.lookAt(0,180,0);}view();
+ function resize(){let w=stage.clientWidth,h=w<450?460:560;stage.style.height=h+'px';renderer.setSize(w,h);camera.aspect=w/h;camera.updateProjectionMatrix();}new ResizeObserver(resize).observe(stage);resize();
+ const range=root.querySelector('#duck-range'),select=root.querySelector('#duck-group'),percent=root.querySelector('#duck-percent');function setTarget(v){let key=select.value;if(key==='all')for(let k in targets)targets[k]=v;else targets[key]=v;percent.textContent=Math.round(v*100)+'%';}
+ range.oninput=()=>setTarget(+range.value/100);select.onchange=()=>{let v=select.value==='all'?Object.values(targets).reduce((a,b)=>a+b)/5:targets[select.value];range.value=Math.round(v*100);percent.textContent=range.value+'%';};root.querySelector('#duck-open').onclick=()=>{range.value=100;setTarget(1)};root.querySelector('#duck-close').onclick=()=>{for(let k in targets)targets[k]=0;range.value=0;percent.textContent='0%'};
+ let drag=false,lx=0,ly=0;renderer.domElement.onpointerdown=e=>{drag=true;lx=e.clientX;ly=e.clientY;renderer.domElement.setPointerCapture(e.pointerId)};renderer.domElement.onpointermove=e=>{if(drag){az-=(e.clientX-lx)*.009;el=Math.max(-.15,Math.min(1.2,el+(e.clientY-ly)*.006));lx=e.clientX;ly=e.clientY;view();}};renderer.domElement.onpointerup=()=>drag=false;renderer.domElement.onpointercancel=()=>drag=false;renderer.domElement.addEventListener('wheel',e=>{e.preventDefault();dist=Math.max(420,Math.min(1350,dist+e.deltaY*.5));view();},{passive:false});
+ let lastText='';function tick(){for(let k in levels)levels[k]+=(targets[k]-levels[k])*.15;for(let p of items)p.g.position.copy(p.pos).addScaledVector(p.delta,levels[p.section]);renderer.render(scene,camera);let text=Object.values(targets).every(x=>x===0)?'完整装配':'局部 / 整机展开';if(text!==lastText){caption.textContent=text+' · 拖动旋转，滚轮缩放 · 内部件为布局模型，非加工模型';lastText=text;}requestAnimationFrame(tick);}tick();
+})();
+</script>
+</main></html>
