@@ -1,0 +1,54 @@
+name: Import robot design archive once
+on:
+  push:
+    branches: ['codex/screen-mecanum-design-20260909']
+    paths: ['.github/workflows/import-robot-design-once.yml']
+permissions:
+  contents: write
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: codex/screen-mecanum-design-20260909
+      - name: Verify archive and restore requested design files
+        shell: python
+        run: |
+          import base64, hashlib, io, json, pathlib, shutil, zipfile
+          root = pathlib.Path.cwd()
+          staging = root / '.design-import'
+          chunks = sorted(staging.glob('*.b64'))
+          assert [p.name for p in chunks] == [f'{i:03}.b64' for i in range(41)]
+          data = base64.b64decode(''.join(p.read_text() for p in chunks), validate=True)
+          assert len(data) == 22712110
+          assert hashlib.sha256(data).hexdigest() == 'ef5495df9e62137c2dfe4dc7bc5dd2de7edec8756abd4feab3ba8090120ca1e7'
+          with zipfile.ZipFile(io.BytesIO(data)) as z:
+              assert len(z.infolist()) == 34
+              for item in z.infolist():
+                  path = pathlib.PurePosixPath(item.filename)
+                  assert not path.is_absolute() and '..' not in path.parts
+                  assert item.filename.startswith('projects/microduck-pet-v2/')
+                  target = root / item.filename
+                  assert not target.exists(), str(target)
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  target.write_bytes(z.read(item))
+          base = root / 'projects/microduck-pet-v2'
+          manifest = json.loads((base / 'MANIFEST.json').read_text())
+          for f in manifest['files']:
+              b = (base / f['path']).read_bytes()
+              assert len(b) == f['bytes'] and hashlib.sha256(b).hexdigest() == f['sha256']
+          readme = root / 'README.md'
+          readme.write_text(readme.read_text() + '\n\n## 新版宠物机器人设计（2026-09-09）\n\n[新方案、效果图、修改与对话记录](projects/microduck-pet-v2/README.md)。当前为概念和布局归档，尚未完成高还原度CAD与交互装配模型。\n')
+          shutil.rmtree(staging)
+          (root / '.github/workflows/import-robot-design-once.yml').unlink()
+          print('Verified 34 files and all manifest hashes; removed temporary import files.')
+      - name: Commit design archive to dedicated branch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- projects/microduck-pet-v2 README.md .design-import .github/workflows/import-robot-design-once.yml
+          git commit -m "Archive robot redesign, assets, change log and conversation"
+          git push origin HEAD:refs/heads/codex/screen-mecanum-design-20260909
